@@ -5,7 +5,7 @@
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
 
-#if !EXPERIMENTAL_IL2CPP_PUERTS || !ENABLE_IL2CPP
+#if !PUERTS_IL2CPP_OPTIMIZATION || !ENABLE_IL2CPP
 
 using System;
 using System.Collections.Generic;
@@ -40,7 +40,7 @@ namespace Puerts
 
             for(int i = 0; i < Length; i++)
             {
-                var nativeValuePtr = PuertsDLL.GetArgumentValue(info, i);
+                var nativeValuePtr = PuertsDLL.GetArgumentValue(isolate, info, i);
                 NativePtrs[i] = nativeValuePtr;
                 var type = PuertsDLL.GetJsValueType(isolate, nativeValuePtr, false);
                 JsTypes[i] = type;
@@ -235,13 +235,14 @@ namespace Puerts
             return args;
         }
 
-        public void FillByRefParameters(JSCallInfo callInfo)
+        public void FillByRefParameters(JSCallInfo callInfo, object[] argsWithNewRef = null)
         {
+            if (argsWithNewRef == null) argsWithNewRef = args; 
             for (int i = 0; i < paramLength; i++)
             {
                 if (paramIsByRef[i])
                 {
-                    byRefValueSetFuncs[i](jsEnv.Idx, callInfo.Isolate, NativeValueApi.SetValueToByRefArgument, callInfo.NativePtrs[i], args[i]);
+                    byRefValueSetFuncs[i](jsEnv.Idx, callInfo.Isolate, NativeValueApi.SetValueToByRefArgument, callInfo.NativePtrs[i], argsWithNewRef[i]);
                 }
             }
         }
@@ -316,7 +317,7 @@ namespace Puerts
                     args = new object[] { jsEnv.GeneralGetterManager.GetSelf(jsEnv.Idx, jsCallInfo.Self) }.Concat(args).ToArray();
                 }
                 object ret = methodInfo.Invoke(target, args);
-                parameters.FillByRefParameters(jsCallInfo);
+                parameters.FillByRefParameters(jsCallInfo, args);
                 resultSetter(jsEnv.Idx, jsCallInfo.Isolate, NativeValueApi.SetValueToResult, jsCallInfo.Info, ret);
             }
             finally
@@ -356,7 +357,7 @@ namespace Puerts
             {
                 try
                 {
-                    var arg0 = PuertsDLL.GetArgumentValue(info, 0);
+                    var arg0 = PuertsDLL.GetArgumentValue(isolate, info, 0);
                     var arg0type = NativeValueApi.GetValueFromArgument.GetJsValueType(isolate, arg0, false);
                     if (arg0type == JsValueType.Function || arg0type == JsValueType.NativeObject)
                     {

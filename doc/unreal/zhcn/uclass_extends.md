@@ -123,7 +123,7 @@ class TsTestActor extends UE.Actor {
 
 void，number，string，bigint，boolean，UE模块下的UObject派生类、枚举、UStruct，TArray、TSet、TMap、TSubclassOf（类引用）、TSoftObjectPtr（软对象引用）、TSoftClassPtr（软类引用）
 
-注意：一个函数返回类型声明为void才是无返回值，如果一个函数不声明返回类型，等同于返回any类型，而自动半丁模式并不支持any类型
+注意：一个函数返回类型声明为void才是无返回值，如果一个函数不声明返回类型，等同于返回any类型，而自动Binding模式并不支持any类型
 
 如下是几个字段和方法的示例：
 
@@ -195,6 +195,27 @@ class TsTestActor extends UE.Actor {
     //@no-blueprint
     TsOnlyField: number;
 }
+~~~
+
+### uproperty ufunction 
+~~~typescript
+import * as UE from 'ue'
+import { uproperty,uparam,ufunction } from 'ue';  
+class TsTestActor extends UE.Actor
+{
+    //注:不可以直接从UE中调用，应该import uproperty,ufuncion,uparam后调用
+    //@UE.uproperty.umeta(UE.uproperty.Category="TEST Property") //错误
+    
+    @uproperty.umeta(uproperty.ToolTip="Test Value")
+    @uproperty.uproperty(uproperty.BlueprintReadOnly,uproperty.Category="TEST Category")
+    TestValue:number;
+
+    @ufunction.ufunction(ufunction.BlueprintPure)
+    public update(AA:number , BB:number):void 
+    {   
+    }
+}
+export default TsTestActor;
 ~~~
 
 ### rpc

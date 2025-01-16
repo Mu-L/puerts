@@ -4,6 +4,24 @@ using System.Runtime.InteropServices;
 
 namespace Puerts.UnitTest
 {
+    [UnityEngine.Scripting.Preserve]
+    public class TestGC
+    {
+        public static int ObjCount = 0;
+
+        [UnityEngine.Scripting.Preserve]
+        public TestGC()
+        {
+            ++ObjCount;
+        }
+
+        [UnityEngine.Scripting.Preserve]
+
+        ~TestGC()
+        {
+            --ObjCount;
+        }
+    }
 
     public class TestObject
     {
@@ -11,6 +29,22 @@ namespace Puerts.UnitTest
         public TestObject(int val)
         {
             value = val;
+        }
+        
+        static int tmp;
+        
+        public int WriteOnly
+        {
+            set {
+                tmp = value;
+            }
+        }
+        
+        public static int StaticWriteOnly
+        {
+            set {
+                tmp = value;
+            }
         }
     }
     public struct TestStruct
@@ -23,6 +57,34 @@ namespace Puerts.UnitTest
             value = val;
             value2 = 0;
             value3 = 0;
+        }
+    }
+    [UnityEngine.Scripting.Preserve]
+    public struct TestStruct2
+    {
+        public int v1;
+        public int v2;
+        public string v3;
+
+        [UnityEngine.Scripting.Preserve]
+        public TestStruct2(int p1, int p2, string p3)
+        {
+            v1 = p1;
+            v2 = p2;
+            v3 = p3;
+        }
+
+        [UnityEngine.Scripting.Preserve]
+        public override string ToString()
+        {
+            return v1 + ":" + v2 + ":" + v3;
+        }
+
+
+        [UnityEngine.Scripting.Preserve]
+        public string GetString()
+        {
+            return v1 + ":" + v2 + ":" + v3;
         }
     }
     [StructLayout(LayoutKind.Sequential)]
@@ -126,7 +188,7 @@ namespace Puerts.UnitTest
 
         public TestHelper()
         {
-#if UNITY_EDITOR || !EXPERIMENTAL_IL2CPP_PUERTS
+#if UNITY_EDITOR || !PUERTS_IL2CPP_OPTIMIZATION
             var env = UnitTestEnv.GetEnv();
             env.UsingFunc<int>();
             env.UsingFunc<int, int>();
@@ -472,8 +534,29 @@ namespace Puerts.UnitTest
         }
 
         /**
-        * CS侧暂无法处理，判断引用即可
+        * JSObject
         */
+        public JSObject jsObjectTestField = default(JSObject);
+        protected JSObject _jsObjectTestProp = default(JSObject);
+        public JSObject jsObjectTestProp 
+        {
+            get { return _jsObjectTestProp; }
+            set { _jsObjectTestProp = value; }
+        }
+        public static JSObject jsObjectTestFieldStatic = default(JSObject);
+        protected static JSObject _jsObjectTestPropStatic = default(JSObject);
+        public static JSObject jsObjectTestPropStatic
+        {
+            get { return _jsObjectTestPropStatic; }
+            set { _jsObjectTestPropStatic = value; }
+        }
+        public void JSObjectTestCheckMemberValue()
+        {
+            AssertAndPrint("CSJSObjectTestField", jsObjectTestField.Get<string>("puerts") == "niubi");
+            AssertAndPrint("CSJSObjectTestProp", jsObjectTestProp.Get<string>("puerts") == "niubi");
+            AssertAndPrint("CSJSObjectTestFieldStatic", jsObjectTestFieldStatic.Get<string>("puerts") == "niubi");
+            AssertAndPrint("CSJSObjectTestPropStatic", jsObjectTestPropStatic.Get<string>("puerts") == "niubi");
+        }
         public JSObject JSObjectTestPipeLine(JSObject initialValue, Func<JSObject, JSObject> JSValueHandler) 
         {
             AssertAndPrint("CSGetJSObjectArgFromJS", initialValue.Get<string>("puerts") == "niubi");
@@ -499,6 +582,35 @@ namespace Puerts.UnitTest
             var ret = (TestStruct)ReturnAnyTestFunc.Invoke();
             AssertAndPrint("InvokeReturnNativeStructTestFunc", srcValue.value, ret.value);
         }
+    }
+    
+            
+    public class FooVE
+    {
+        public IFoo foo;
+
+        public FooVE()
+        {
+            foo = new FooAccess();
+        }
+        
+        static FooVE _instance;
+
+        public static FooVE Instance()
+        {
+            if (_instance == null) _instance = new FooVE();
+            return _instance;
+        }
+    }
+
+    public interface IFoo
+    {
+        float width { get; }
+    }
+
+    internal class FooAccess : IFoo
+    {
+        float IFoo.width => 125f; // Note the explicit interface `IFoo.`
     }
 
     [TestFixture]
@@ -533,6 +645,42 @@ namespace Puerts.UnitTest
                 })()
             ");
             jsEnv.Tick();
+        }
+        
+        [Test]
+        public void WriteOnlyTest()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+            jsEnv.Eval(@"
+                (function() {
+                    let o = new CS.Puerts.UnitTest.TestObject(1);
+                    let v = o.WriteOnly;
+                    let sv = CS.Puerts.UnitTest.TestObject.StaticWriteOnly
+                })()
+            ");
+            jsEnv.Tick();
+        }
+        
+        [Test]
+        public void NoNewOnStaticFunction()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+            try 
+            {
+                jsEnv.Eval(@"
+                    (function() {
+                        const TestHelper = CS.Puerts.UnitTest.TestHelper;
+                        new TestHelper.GetInstance();
+                    })()
+                ");
+            } 
+            catch(Exception e) 
+            {
+                StringAssert.Contains("not a constructor", e.Message);
+                jsEnv.Tick();
+                return;
+            }
+            throw new Exception("unexpected to reach here");
         }
         [Test]
         public void NumberInstanceTest()
@@ -740,6 +888,24 @@ namespace Puerts.UnitTest
             jsEnv.Tick();
         }
         [Test]
+        public void TestStructAccess()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+            // preload
+            jsEnv.Eval(@"
+                 (function() {
+                     return CS.Puerts.UnitTest.TestStruct2
+                 })()
+            ");
+            var res = jsEnv.Eval<string>(@"
+                 (function() {
+                     const s1 = new CS.Puerts.UnitTest.TestStruct2(5345, 3214, 'fqpziq');
+                     return s1.ToString();
+                 })()
+            ");
+            Assert.AreEqual("5345:3214:fqpziq", res);
+        }
+        [Test]
         public void NullableNativeStructInstanceTest()
         {
             var jsEnv = UnitTestEnv.GetEnv();
@@ -815,6 +981,13 @@ namespace Puerts.UnitTest
                     });
                     assertAndPrint('JSGetJSObjectReturnFromCS', rJSObject == oJSObject);
 
+                    assertAndPrint('JSGetJSObjectField', testHelper.jsObjectTestField == null);
+                    assertAndPrint('JSGetJSObjectStaticField', TestHelper.jsObjectTestFieldStatic == null);
+                    testHelper.jsObjectTestField = { 'puerts': 'niubi' }
+                    testHelper.jsObjectTestProp = { 'puerts': 'niubi' }
+                    TestHelper.jsObjectTestFieldStatic = { 'puerts': 'niubi' }
+                    TestHelper.jsObjectTestPropStatic = { 'puerts': 'niubi' }
+                    testHelper.JSObjectTestCheckMemberValue();
                 })()
             ");
             jsEnv.Tick();
@@ -849,6 +1022,87 @@ namespace Puerts.UnitTest
             ");
             Assert.AreEqual("213 1 213", ret);
             jsEnv.Tick();
+        }
+        
+        [Test]
+        public void AccessExplicitnterfaceImplementation()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+
+            var ret = jsEnv.Eval<float>(@"
+                (function() {
+                    const foove = CS.Puerts.UnitTest.FooVE.Instance();
+                    console.log(foove);
+                    console.log(foove.foo);
+                    console.log(foove.foo.width);
+                    return foove.foo.width;
+                })()
+            ");
+            Assert.AreEqual(FooVE.Instance().foo.width, ret);
+            jsEnv.Tick();
+        }
+
+        [Test]
+        public void CallDelegateAfterJsEnvDisposed()
+        {
+#if PUERTS_GENERAL
+            var jsEnv = new JsEnv(new TxtLoader());
+#else
+            var jsEnv = new JsEnv(new DefaultLoader());
+#endif
+            var callback = jsEnv.Eval<Action>("() => console.log('hello')");
+            callback();
+            jsEnv.Dispose();
+            Assert.Catch(() =>
+            {
+                callback();
+            });
+        }
+
+        [Test]
+        public void TestJsGC()
+        {
+#if PUERTS_GENERAL
+            var jsEnv = new JsEnv(new TxtLoader());
+#else
+            var jsEnv = new JsEnv(new DefaultLoader());
+#endif
+            var objCount = jsEnv.Eval<int>(@"
+            const randomCount = Math.floor(Math.random() * 50) + 1;
+
+            var objs = []
+            for (let i = 0; i < randomCount; i++) {
+                objs.push(new CS.Puerts.UnitTest.TestGC())
+            }
+            randomCount;
+            ");
+
+            if (jsEnv.Backend is BackendV8)
+            {
+                jsEnv.Eval("gc()");
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.AreEqual(objCount, TestGC.ObjCount);
+            Assert.True(objCount > 0);
+
+            jsEnv.Eval("objs = undefined");
+
+            if (jsEnv.Backend is BackendV8)
+            {
+                jsEnv.Eval("gc()");
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            Assert.AreEqual(0, TestGC.ObjCount);
+
+            jsEnv.Dispose();
         }
     }
 }

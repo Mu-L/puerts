@@ -1,11 +1,9 @@
 ﻿/*
 * Tencent is pleased to support the open source community by making Puerts available.
 * Copyright (C) 2020 THL A29 Limited, a Tencent company.  All rights reserved.
-* Puerts is licensed under the BSD 3-Clause License, except for the third-party components listed in the file 'LICENSE' which may be subject to their corresponding license terms. 
+* Puerts is licensed under the BSD 3-Clause License, except for the third-party components listed in the file 'LICENSE' which may be subject to their corresponding license terms.
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
-
-#if !EXPERIMENTAL_IL2CPP_PUERTS || !ENABLE_IL2CPP
 
 using System;
 using System.Runtime.InteropServices;
@@ -28,6 +26,11 @@ namespace Puerts
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 #endif
     public delegate void V8FunctionCallback(IntPtr isolate, IntPtr info, IntPtr self, int paramLen, long data);
+
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || PUERTS_GENERAL || (UNITY_WSA && !UNITY_EDITOR)
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+#endif
+    public delegate void JsFunctionFinalizeCallback(IntPtr isolate, long data);
 
 #if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN || PUERTS_GENERAL || (UNITY_WSA && !UNITY_EDITOR)
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -78,31 +81,31 @@ namespace Puerts
         public static extern int GetLibVersion();
 
         public static int GetApiLevel() {
-            try 
+            try
             {
                 return _GetApiLevel();
-            } 
-            catch(DllNotFoundException)
+            }
+            catch (DllNotFoundException)
             {
 #if !PUERTS_GENERAL
                 UnityEngine.Debug.LogError("[Puer001] DllNotFoundException detected. You can solve this problem following the FAQ.");
 #endif
                 throw;
             }
-            catch(Exception) 
+            catch (Exception)
             {
                 return GetLibVersion();
             }
         }
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
-        public static extern int GetLibBackend();
+        public static extern int GetLibBackend(IntPtr isolate);
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr CreateJSEngine();
-        
+        public static extern IntPtr CreateJSEngine(int backendType);
+
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr CreateJSEngineWithExternalEnv(IntPtr externalRuntime, IntPtr externalContext);
+        public static extern IntPtr CreateJSEngineWithExternalEnv(int backendType, IntPtr externalRuntime, IntPtr externalContext);
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern void DestroyJSEngine(IntPtr isolate);
@@ -121,7 +124,9 @@ namespace Puerts
 
         private const int TEMP_STRING_BUFFER_SIZE = 1024;
 
+#if UNITY_2017_1_OR_NEWER
         [ThreadStatic]
+#endif
         private static byte[] s_tempNativeStringBuffer;
 
         private static byte[] GetTempNativeStringBuff(int strlen)
@@ -203,7 +208,7 @@ namespace Puerts
             {
                 throw new InvalidProgramException("eval null string");
             }
-            return Eval(isolate, Encoding.UTF8.GetBytes(code), path);
+            return Eval(isolate, Encoding.UTF8.GetBytes(code + '\0'), path);
         }
 #else
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
@@ -278,10 +283,10 @@ namespace Puerts
 
             return RegisterProperty(isolate, classID, name, isStatic, fn1, getterData, fn2, setterData, dontDelete);
         }
-        
+
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr GetJSObjectValueGetter(IntPtr isolate);
-        
+
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr GetModuleExecutor(IntPtr isolate);
 
@@ -311,7 +316,7 @@ namespace Puerts
             else
             {
 #if PUERTS_GENERAL && !PUERTS_GENERAL_OSX
-                __ReturnString(isolate, info, Encoding.UTF8.GetBytes(str));
+                __ReturnString(isolate, info, Encoding.UTF8.GetBytes(str + '\0'));
 #else
                 __ReturnString(isolate, info, str);
 #endif
@@ -346,10 +351,24 @@ namespace Puerts
         }
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void ReturnCSharpFunctionCallback2(IntPtr isolate, IntPtr info, IntPtr v8FunctionCallback, IntPtr JsFunctionFinalize, long data);
+
+        public static void ReturnCSharpFunctionCallback2(IntPtr isolate, IntPtr info, V8FunctionCallback v8FunctionCallback, JsFunctionFinalizeCallback JsFunctionFinalize, long data)
+        {
+#if PUERTS_GENERAL || (UNITY_WSA && !UNITY_EDITOR)
+            GCHandle.Alloc(v8FunctionCallback);
+            GCHandle.Alloc(JsFunctionFinalize);
+#endif
+            IntPtr fn = v8FunctionCallback == null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(v8FunctionCallback);
+            IntPtr fn2 = JsFunctionFinalize == null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(JsFunctionFinalize);
+            ReturnCSharpFunctionCallback2(isolate, info, fn, fn2, data);
+        }
+
+        [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern void ReturnJSObject(IntPtr isolate, IntPtr info, IntPtr JSObject);
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
-        public static extern IntPtr GetArgumentValue(IntPtr info, int index);
+        public static extern IntPtr GetArgumentValue(IntPtr isolate, IntPtr info, int index);
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern JsValueType GetJsValueType(IntPtr isolate, IntPtr value, bool isByRef);
@@ -414,13 +433,13 @@ namespace Puerts
 
         public static void SetStringToOutValue(IntPtr isolate, IntPtr value, string str)
         {
-            if (str == null) 
+            if (str == null)
             {
                 SetNullToOutValue(isolate, value);
             }
             else
             {
-                SetStringToOutValue(isolate, value, Encoding.UTF8.GetBytes(str));
+                SetStringToOutValue(isolate, value, Encoding.UTF8.GetBytes(str + '\0'));
             }
         }
 #else
@@ -428,7 +447,7 @@ namespace Puerts
         protected static extern void __SetStringToOutValue(IntPtr isolate, IntPtr value, string str);
         public static void SetStringToOutValue(IntPtr isolate, IntPtr value, string str)
         {
-            if (str == null) 
+            if (str == null)
             {
                 SetNullToOutValue(isolate, value);
             }
@@ -457,7 +476,7 @@ namespace Puerts
 
         public static void ThrowException(IntPtr isolate, string message)
         {
-            var bytes = Encoding.UTF8.GetBytes(message);
+            var bytes = Encoding.UTF8.GetBytes(message + '\0');
             ThrowException(isolate, bytes);
         }
 #else
@@ -478,6 +497,22 @@ namespace Puerts
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern void PushBigIntForJSFunction(IntPtr function, long l);
 
+#if PUERTS_GENERAL && !PUERTS_GENERAL_OSX
+        [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl, EntryPoint = "PushStringForJSFunction")]
+        public static extern void __PushStringForJSFunction(IntPtr function, byte[] str);
+
+        public static void PushStringForJSFunction(IntPtr function, string str)
+        {
+            if (str == null)
+            {
+                PushNullForJSFunction(function);
+            }
+            else
+            {
+                __PushStringForJSFunction(function, Encoding.UTF8.GetBytes(str + '\0'));
+            }
+        }
+#else
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl, EntryPoint = "PushStringForJSFunction")]
         public static extern void __PushStringForJSFunction(IntPtr function, string str);
 
@@ -492,6 +527,7 @@ namespace Puerts
                 __PushStringForJSFunction(function, str);
             }
         }
+#endif
 
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern void PushNumberForJSFunction(IntPtr function, double d);
@@ -617,7 +653,14 @@ namespace Puerts
         public static extern IntPtr GetArrayBufferFromValue(IntPtr isolate, IntPtr value, out int length, bool isOut);
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
         public static extern IntPtr GetArrayBufferFromResult(IntPtr function, out int length);
+
+        [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
+        public static extern IntPtr GetJSStackTrace(IntPtr isolate, out int len);
+        public static string GetJSStackTrace(IntPtr isolate)
+        {
+            int strlen;
+            IntPtr str = GetJSStackTrace(isolate, out strlen);
+            return GetStringFromNative(str, strlen);
+        }
     }
 }
-
-#endif

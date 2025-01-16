@@ -48,18 +48,54 @@
     }                                          \
     __DefObjectType(TArray<CLS>) __DefCDataPointerConverter(TArray<CLS>)
 
+#define UsingCrossModuleCppType(CLS)                                        \
+    namespace PUERTS_NAMESPACE                                              \
+    {                                                                       \
+    template <>                                                             \
+    struct StaticTypeId<CLS>                                                \
+    {                                                                       \
+        static const void* get()                                            \
+        {                                                                   \
+            static const void* cache_type_id = nullptr;                     \
+            if (!cache_type_id)                                             \
+            {                                                               \
+                auto info = PUERTS_NAMESPACE::FindCppTypeClassByName(#CLS); \
+                cache_type_id = info ? info->TypeId : &cache_type_id;       \
+            }                                                               \
+            return cache_type_id;                                           \
+        }                                                                   \
+    };                                                                      \
+    }                                                                       \
+    UsingNamedCppType(CLS, CLS)
+
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 4
+#define RegisterTArray(CLS)                                                                                                        \
+    PUERTS_NAMESPACE::DefineClass<TArray<CLS>>()                                                                                   \
+        .Method("Add", SelectFunction(int (TArray<CLS>::*)(CLS const&), &TArray<CLS>::Add))                                        \
+        .Method("Get", SelectFunction(CLS& (TArray<CLS>::*) (int), &TArray<CLS>::operator[]))                                      \
+        .Method("GetRef", SelectFunction(CLS& (TArray<CLS>::*) (int), &TArray<CLS>::operator[]))                                   \
+        .Method("Num", MakeFunction(&TArray<CLS>::Num))                                                                            \
+        .Method("Contains", MakeFunction(&TArray<CLS>::Contains<CLS>))                                                             \
+        .Method("FindIndex", SelectFunction(int (TArray<CLS>::*)(CLS const&) const, &TArray<CLS>::Find))                           \
+        .Method(                                                                                                                   \
+            "RemoveAt", SelectFunction(void (TArray<CLS>::*)(int, /* New param in 5.4*/ EAllowShrinking), &TArray<CLS>::RemoveAt)) \
+        .Method("IsValidIndex", MakeFunction(&TArray<CLS>::IsValidIndex))                                                          \
+        .Method("Empty", MakeFunction(&TArray<CLS>::Empty))                                                                        \
+        .Register()
+#else
 #define RegisterTArray(CLS)                                                                              \
     PUERTS_NAMESPACE::DefineClass<TArray<CLS>>()                                                         \
-        .Method("Add", SelectFunction(int (TArray<CLS>::*)(const CLS&), &TArray<CLS>::Add))              \
+        .Method("Add", SelectFunction(int (TArray<CLS>::*)(CLS const&), &TArray<CLS>::Add))              \
         .Method("Get", SelectFunction(CLS& (TArray<CLS>::*) (int), &TArray<CLS>::operator[]))            \
         .Method("GetRef", SelectFunction(CLS& (TArray<CLS>::*) (int), &TArray<CLS>::operator[]))         \
         .Method("Num", MakeFunction(&TArray<CLS>::Num))                                                  \
         .Method("Contains", MakeFunction(&TArray<CLS>::Contains<CLS>))                                   \
-        .Method("FindIndex", SelectFunction(int (TArray<CLS>::*)(const CLS&) const, &TArray<CLS>::Find)) \
+        .Method("FindIndex", SelectFunction(int (TArray<CLS>::*)(CLS const&) const, &TArray<CLS>::Find)) \
         .Method("RemoveAt", SelectFunction(void (TArray<CLS>::*)(int), &TArray<CLS>::RemoveAt))          \
         .Method("IsValidIndex", MakeFunction(&TArray<CLS>::IsValidIndex))                                \
         .Method("Empty", MakeFunction(&TArray<CLS>::Empty))                                              \
         .Register()
+#endif
 
 #define UsingUStruct(CLS) UsingUClass(CLS)
 
@@ -94,7 +130,7 @@ public:
 
     TCharStringHolder(v8::Local<v8::Context> context, const v8::Local<v8::Value> value)
     {
-        Str = UTF8_TO_TCHAR(*v8::String::Utf8Value(context->GetIsolate(), value));
+        Str = FV8Utils::ToFString(context->GetIsolate(), value);
     }
 
     const TCHAR* Data() const
@@ -118,12 +154,12 @@ struct Converter<FString>
 {
     static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, FString value)
     {
-        return v8::String::NewFromUtf8(context->GetIsolate(), TCHAR_TO_UTF8(*value), v8::NewStringType::kNormal).ToLocalChecked();
+        return FV8Utils::ToV8String(context->GetIsolate(), value);
     }
 
     static FString toCpp(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
     {
-        return UTF8_TO_TCHAR(*v8::String::Utf8Value(context->GetIsolate(), value));
+        return FV8Utils::ToFString(context->GetIsolate(), value);
     }
 
     static bool accept(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
@@ -137,8 +173,7 @@ struct Converter<FName>
 {
     static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, FName value)
     {
-        return v8::String::NewFromUtf8(context->GetIsolate(), TCHAR_TO_UTF8(*value.ToString()), v8::NewStringType::kNormal)
-            .ToLocalChecked();
+        return FV8Utils::ToV8String(context->GetIsolate(), value.ToString());
     }
 
     static FName toCpp(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
@@ -153,7 +188,7 @@ struct Converter<FName>
                 return *static_cast<FName*>(Data);
             }
         }
-        return UTF8_TO_TCHAR(*v8::String::Utf8Value(context->GetIsolate(), value));
+        return FV8Utils::ToFName(context->GetIsolate(), value);
     }
 
     static bool accept(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
@@ -167,7 +202,7 @@ struct Converter<const TCHAR*>
 {
     static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, const TCHAR* value)
     {
-        return v8::String::NewFromUtf8(context->GetIsolate(), TCHAR_TO_UTF8(value), v8::NewStringType::kNormal).ToLocalChecked();
+        return FV8Utils::ToV8String(context->GetIsolate(), value);
     }
 
     static TCharStringHolder toCpp(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
@@ -187,13 +222,12 @@ struct Converter<FText>
 {
     static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, FText value)
     {
-        return v8::String::NewFromUtf8(context->GetIsolate(), TCHAR_TO_UTF8(*value.ToString()), v8::NewStringType::kNormal)
-            .ToLocalChecked();
+        return FV8Utils::ToV8String(context->GetIsolate(), value.ToString());
     }
 
     static FText toCpp(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
     {
-        return FText::FromString(UTF8_TO_TCHAR(*v8::String::Utf8Value(context->GetIsolate(), value)));
+        return FText::FromString(FV8Utils::ToFString(context->GetIsolate(), value));
     }
 
     static bool accept(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
@@ -285,7 +319,8 @@ struct Converter<T*, typename std::enable_if<std::is_convertible<T*, const UObje
 {
     static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, T* value)
     {
-        return DataTransfer::FindOrAddObject<T>(context->GetIsolate(), context, value);
+        using TypeWithoutConst = typename std::remove_const<T>::type;
+        return DataTransfer::FindOrAddObject<TypeWithoutConst>(context->GetIsolate(), context, (TypeWithoutConst*) (value));
     }
 
     static T* toCpp(v8::Local<v8::Context> context, const v8::Local<v8::Value>& value)
@@ -455,10 +490,10 @@ struct IsUStructHelper<T, Void_t<decltype(&TScriptStructTraits<T>::Get)>> : std:
 namespace v8_impl
 {
 template <typename T>
-struct Converter<T*,
-    typename std::enable_if<!std::is_convertible<T*, const UObject*>::value && internal::IsUStructHelper<T>::value>::type>
+struct Converter<T*, typename std::enable_if<!std::is_const<T>::value && !std::is_convertible<T*, const UObject*>::value &&
+                                             internal::IsUStructHelper<T>::value>::type>
 {
-    static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, T* value)
+    static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, const T* value)
     {
         return DataTransfer::FindOrAddStruct<T>(context->GetIsolate(), context, (void*) value, true);
     }
@@ -475,9 +510,16 @@ struct Converter<T*,
 };
 
 template <typename T>
+struct Converter<const T*,
+    typename std::enable_if<!std::is_convertible<T*, const UObject*>::value && internal::IsUStructHelper<T>::value>::type>
+    : Converter<T*>
+{
+};
+
+template <typename T>
 struct Converter<T, typename std::enable_if<internal::IsUStructHelper<T>::value>::type>
 {
-    static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, T value)
+    static v8::Local<v8::Value> toScript(v8::Local<v8::Context> context, const T value)
     {
         return DataTransfer::FindOrAddStruct<T>(context->GetIsolate(), context, new T(value), false);
     }
@@ -494,6 +536,16 @@ struct Converter<T, typename std::enable_if<internal::IsUStructHelper<T>::value>
     }
 };
 
+template <typename T>
+struct Converter<const T, typename std::enable_if<internal::IsUStructHelper<T>::value>::type> : Converter<T>
+{
+};
+
 }    // namespace v8_impl
+
+template <typename T>
+struct ScriptTypeName<const T, typename std::enable_if<internal::IsUStructHelper<T>::value>::type> : ScriptTypeName<T>
+{
+};
 
 }    // namespace PUERTS_NAMESPACE

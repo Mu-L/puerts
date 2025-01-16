@@ -19,7 +19,7 @@ namespace internal
 class AutoValueScope
 {
 public:
-    AutoValueScope(pesapi_env_holder env_holder)
+    AutoValueScope(pesapi_env_ref env_holder)
     {
         scope = pesapi_open_scope(env_holder);
     }
@@ -44,28 +44,48 @@ class Object
 public:
     Object(pesapi_env env, pesapi_value value)
     {
-        env_holder = pesapi_hold_env(env);
-        value_holder = pesapi_hold_value(env, value);
+        if (!env || !value || IsNullOrUndefined(env, value))
+        {
+            env_holder = nullptr;
+            value_holder = nullptr;
+        }
+        else
+        {
+            env_holder = pesapi_create_env_ref(env);
+            value_holder = pesapi_create_value_ref(env, value, 0);
+        }
     }
 
     Object(const Object& InOther)
     {
-        env_holder = pesapi_duplicate_env_holder(InOther.env_holder);
-        value_holder = pesapi_duplicate_value_holder(InOther.value_holder);
+        if (!InOther.env_holder || !InOther.value_holder)
+        {
+            env_holder = nullptr;
+            value_holder = nullptr;
+        }
+        else
+        {
+            env_holder = pesapi_duplicate_env_ref(InOther.env_holder);
+            value_holder = pesapi_duplicate_value_ref(InOther.value_holder);
+        }
     }
 
     ~Object()
     {
-        pesapi_release_value_holder(value_holder);
-        pesapi_release_env_holder(env_holder);
+        if (!env_holder || !value_holder)
+            return;
+        pesapi_release_value_ref(value_holder);
+        pesapi_release_env_ref(env_holder);
     }
 
     template <typename T>
     T Get(const char* key) const
     {
+        if (!env_holder || !value_holder)
+            return {};
         internal::AutoValueScope ValueScope(env_holder);
-        auto env = pesapi_get_env_from_holder(env_holder);
-        auto object = pesapi_get_value_from_holder(env, value_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+        auto object = pesapi_get_value_from_ref(env, value_holder);
 
         auto value = pesapi_get_property(env, object, key);
         if (!pesapi_is_undefined(env, value))
@@ -78,29 +98,33 @@ public:
     template <typename T>
     void Set(const char* key, T val) const
     {
+        if (!env_holder || !value_holder)
+            return;
         internal::AutoValueScope ValueScope(env_holder);
-        auto env = pesapi_get_env_from_holder(env_holder);
-        auto object = pesapi_get_value_from_holder(env, value_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+        auto object = pesapi_get_value_from_ref(env, value_holder);
 
         pesapi_set_property(env, object, key, pesapi_impl::Converter<T>::toScript(env, val));
     }
 
     bool IsValid() const
     {
+        if (!env_holder || !value_holder)
+            return false;
         internal::AutoValueScope ValueScope(env_holder);
-        auto env = pesapi_get_env_from_holder(env_holder);
-        auto val = pesapi_get_value_from_holder(env, value_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+        auto val = pesapi_get_value_from_ref(env, value_holder);
         return val && pesapi_is_object(env, val);
     }
 
     void operator=(const Object& obj)
     {
-        env_holder = pesapi_duplicate_env_holder(obj.env_holder);
-        value_holder = pesapi_duplicate_value_holder(obj.value_holder);
+        env_holder = pesapi_duplicate_env_ref(obj.env_holder);
+        value_holder = pesapi_duplicate_value_ref(obj.value_holder);
     }
 
-    pesapi_env_holder env_holder;
-    pesapi_value_holder value_holder;
+    pesapi_env_ref env_holder;
+    pesapi_value_ref value_holder;
 
     friend struct pesapi_impl::Converter<Object>;
 };
@@ -115,9 +139,11 @@ public:
     template <typename... Args>
     void Action(Args... cppArgs) const
     {
+        if (!env_holder || !value_holder)
+            return;
         internal::AutoValueScope ValueScope(env_holder);
-        auto env = pesapi_get_env_from_holder(env_holder);
-        auto object = pesapi_get_value_from_holder(env, value_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+        auto object = pesapi_get_value_from_ref(env, value_holder);
 
         auto _un_used = invokeHelper(env, object, cppArgs...);
 
@@ -130,9 +156,11 @@ public:
     template <typename Ret, typename... Args>
     Ret Func(Args... cppArgs) const
     {
+        if (!env_holder || !value_holder)
+            return {};
         internal::AutoValueScope ValueScope(env_holder);
-        auto env = pesapi_get_env_from_holder(env_holder);
-        auto object = pesapi_get_value_from_holder(env, value_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+        auto object = pesapi_get_value_from_ref(env, value_holder);
 
         auto ret = invokeHelper(env, object, cppArgs...);
 
@@ -149,10 +177,26 @@ public:
 
     bool IsValid() const
     {
+        if (!env_holder || !value_holder)
+            return false;
         internal::AutoValueScope ValueScope(env_holder);
-        auto env = pesapi_get_env_from_holder(env_holder);
-        auto val = pesapi_get_value_from_holder(env, value_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+        auto val = pesapi_get_value_from_ref(env, value_holder);
         return val && pesapi_is_function(env, val);
+    }
+
+    template <typename T>
+    void SetWeakAndOwnBy(const T* Owner)
+    {
+        internal::AutoValueScope ValueScope(env_holder);
+        auto env = pesapi_get_env_from_ref(env_holder);
+
+        auto owner = pesapi_native_object_to_value(env, StaticTypeId<T>::get(), Owner, false);
+        auto val = pesapi_get_value_from_ref(env, value_holder);
+        if (pesapi_set_owner(env, val, owner))
+        {
+            pesapi_set_ref_weak(env, value_holder);
+        }
     }
 
 private:
@@ -198,7 +242,7 @@ struct Converter<Object>
 {
     static pesapi_value toScript(pesapi_env env, Object value)
     {
-        return pesapi_get_value_from_holder(env, value.value_holder);
+        return pesapi_get_value_from_ref(env, value.value_holder);
     }
 
     static Object toCpp(pesapi_env env, pesapi_value value)
@@ -217,7 +261,7 @@ struct Converter<Function>
 {
     static pesapi_value toScript(pesapi_env env, Function value)
     {
-        return pesapi_get_value_from_holder(env, value.value_holder);
+        return pesapi_get_value_from_ref(env, value.value_holder);
     }
 
     static Function toCpp(pesapi_env env, pesapi_value value)

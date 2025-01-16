@@ -18,32 +18,43 @@ namespace Puerts.Editor
         {
 
             public static Dictionary<string, List<KeyValuePair<object, int>>> configure;
-            public static List<Type> genTypes;
 
-            public static void ExportDTS(string saveTo, ILoader loader = null, bool csharpModuleWillGen = false)
+            static Dictionary<string, List<KeyValuePair<object, int>>> getConfigure()
             {
                 if (!Utils.HasFilter)
                 {
                     Utils.SetFilters(Configure.GetFilters());
+                }
+
+                if (configure == null)
+                {
                     configure = Configure.GetConfigureByTags(new List<string>() {
                         "Puerts.BindingAttribute",
                         "Puerts.BlittableCopyAttribute",
                         "Puerts.TypingAttribute",
                     });
+                }
 
-                    genTypes = configure["Puerts.BindingAttribute"].Select(kv => kv.Key)
+                return configure;
+            }
+
+            public static void ExportDTS(string saveTo, ILoader loader = null, bool csharpModuleWillGen = false)
+            {
+                var configure = getConfigure();
+
+                var genTypes = configure["Puerts.BindingAttribute"].Select(kv => kv.Key)
                         .Where(o => o is Type)
                         .Cast<Type>()
                         .Where(t => !t.IsGenericTypeDefinition && !t.Name.StartsWith("<"))
                         .Distinct()
                         .ToList();
-                }
 
                 var tsTypes = configure["Puerts.TypingAttribute"].Select(kv => kv.Key)
                     .Where(o => o is Type)
                     .Cast<Type>()
                     .Where(t => !t.IsGenericTypeDefinition)
                     .Concat(genTypes)
+                    .Concat(new Type[] { typeof(System.Type) }) // System.Type will be use in puerts.d.ts, so always generate it 
                     .Distinct();
 
                 if (loader == null)
@@ -68,23 +79,14 @@ namespace Puerts.Editor
 
             public static void ExportWrapper(string saveTo, ILoader loader = null)
             {
-                if (!Utils.HasFilter)
-                {
-                    Utils.SetFilters(Configure.GetFilters());
+                var configure = getConfigure();
 
-                    configure = Configure.GetConfigureByTags(new List<string>() {
-                        "Puerts.BindingAttribute",
-                        "Puerts.BlittableCopyAttribute",
-                        "Puerts.TypingAttribute",
-                    });
-
-                    genTypes = configure["Puerts.BindingAttribute"].Select(kv => kv.Key)
+                var genTypes = configure["Puerts.BindingAttribute"].Select(kv => kv.Key)
                         .Where(o => o is Type)
                         .Cast<Type>()
                         .Where(t => !t.IsGenericTypeDefinition && !t.Name.StartsWith("<"))
                         .Distinct()
                         .ToList();
-                }
 
                 var blittableCopyTypes = new HashSet<Type>(configure["Puerts.BlittableCopyAttribute"].Select(kv => kv.Key)
                     .Where(o => o is Type)

@@ -41,6 +41,9 @@ public:
     Object(v8::Local<v8::Context> context, v8::Local<v8::Value> object)
     {
         Isolate = context->GetIsolate();
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         GContext.Reset(Isolate, context);
         GObject.Reset(Isolate, object.As<v8::Object>());
         JsEnvLifeCycleTracker = DataTransfer::GetJsEnvLifeCycleTracker(Isolate);
@@ -54,6 +57,9 @@ public:
             return;
         }
         Isolate = InOther.Isolate;
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         GContext.Reset(Isolate, InOther.GContext.Get(Isolate));
@@ -69,6 +75,9 @@ public:
             return *this;
         }
         Isolate = InOther.Isolate;
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         GContext.Reset(Isolate, InOther.GContext.Get(Isolate));
@@ -79,10 +88,20 @@ public:
 
     ~Object()
     {
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         if (JsEnvLifeCycleTracker.expired())
         {
+#if V8_MAJOR_VERSION < 11
             GObject.Empty();
             GContext.Empty();
+#endif
+        }
+        else
+        {
+            GObject.Reset();
+            GContext.Reset();
         }
     }
 
@@ -93,6 +112,9 @@ public:
         {
             return {};
         }
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
@@ -115,6 +137,9 @@ public:
         {
             return;
         }
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
@@ -129,6 +154,9 @@ public:
     {
         if (JsEnvLifeCycleTracker.expired() || !Isolate || GContext.IsEmpty() || GObject.IsEmpty())
             return false;
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
@@ -147,6 +175,9 @@ public:
             return;
         if (JsEnvLifeCycleTracker.expired() || !Isolate || GContext.IsEmpty() || GObject.IsEmpty())
             return;
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
@@ -157,17 +188,23 @@ public:
         {
             auto JsObject = Val.template As<v8::Object>();
 #if V8_MAJOR_VERSION < 8
-            JsObject->Set(Context, v8::String::NewFromUtf8(Isolate, "_p_i_only_one_child").ToLocalChecked(), GObject.Get(Isolate));
+            JsObject->Set(Context, v8::String::NewFromUtf8(Isolate, "_p_i_only_one_child").ToLocalChecked(), GObject.Get(Isolate))
+                .Check();
 #else
-            JsObject->Set(Context, v8::String::NewFromUtf8Literal(Isolate, "_p_i_only_one_child"), GObject.Get(Isolate));
+            JsObject->Set(Context, v8::String::NewFromUtf8Literal(Isolate, "_p_i_only_one_child"), GObject.Get(Isolate)).Check();
 #endif
             GObject.SetWeak();
         }
     }
 
     v8::Isolate* Isolate;
+#if V8_MAJOR_VERSION >= 11
+    v8::Persistent<v8::Context> GContext;
+    v8::Persistent<v8::Object> GObject;
+#else
     v8::Global<v8::Context> GContext;
     v8::Global<v8::Object> GObject;
+#endif
 
     std::weak_ptr<int> JsEnvLifeCycleTracker;
 
@@ -192,6 +229,9 @@ public:
         {
             return;
         }
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
@@ -216,6 +256,9 @@ public:
         {
             return {};
         }
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
@@ -243,6 +286,9 @@ public:
     {
         if (JsEnvLifeCycleTracker.expired() || !Isolate || GContext.IsEmpty() || GObject.IsEmpty())
             return false;
+#ifdef THREAD_SAFE
+        v8::Locker Locker(Isolate);
+#endif
         v8::Isolate::Scope IsolateScope(Isolate);
         v8::HandleScope HandleScope(Isolate);
         auto Context = GContext.Get(Isolate);
